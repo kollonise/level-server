@@ -1,3 +1,6 @@
+// Загружаем переменные из .env (только для локальной разработки)
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -10,6 +13,18 @@ const PORT = process.env.PORT || 3000;
 // ============ КОНФИГУРАЦИЯ GIST ============
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_ID = process.env.GIST_ID;
+
+// Проверяем, что переменные заданы
+if (!GITHUB_TOKEN || !GIST_ID) {
+  console.error('❌ ERROR: GITHUB_TOKEN and GIST_ID must be set in environment variables!');
+  console.error('   Local: create .env file with these variables');
+  console.error('   Render: add them in Environment settings');
+  process.exit(1);
+}
+
+console.log(`✅ Gist storage configured (ID: ${GIST_ID.substring(0, 8)}...)`);
+
+// ... остальной код без изменений
 
 // Middleware
 app.use(cors());
@@ -26,11 +41,6 @@ const upload = multer({
 let cachedLevels = null;
 let lastFetchTime = 0;
 const CACHE_TTL = 60000; // 1 минута
-
-if (!GITHUB_TOKEN || !GIST_ID) {
-  console.error('❌ ERROR: GITHUB_TOKEN and GIST_ID must be set in environment variables!');
-  process.exit(1);
-}
 
 // ============ ФУНКЦИИ ДЛЯ РАБОТЫ С GIST ============
 
