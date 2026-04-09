@@ -9,16 +9,20 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const fs = require('fs').promises;
-const path = require('path');
+// Middleware
+app.use(cors());
+app.use(express.json());
 
-const UPLOADS_DIR = process.env.RENDER ? '/tmp/uploads' : 'uploads';
-const DB_PATH = process.env.RENDER ? '/tmp/levels.db' : 'levels.db';
+// Используем временную папку на Render
+const UPLOADS_DIR = process.env.RENDER ? path.join('/tmp', 'uploads') : 'uploads';
+const DB_PATH = process.env.RENDER ? path.join('/tmp', 'levels.db') : 'levels.db';
 
+// Настройка multer
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
-    await fs.mkdir(path.join(UPLOADS_DIR, 'levels'), { recursive: true });
-    cb(null, path.join(UPLOADS_DIR, 'levels'));
+    const uploadPath = path.join(UPLOADS_DIR, 'levels');
+    await fs.mkdir(uploadPath, { recursive: true });
+    cb(null, uploadPath);
   },
   filename: (req, file, cb) => {
     const id = uuidv4();
@@ -28,9 +32,10 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: 10 * 1024 * 1024 } // 10MB лимит
 });
 
+// База данных
 const db = new sqlite3.Database(DB_PATH);
 
 db.serialize(() => {
@@ -71,7 +76,7 @@ app.get('/api/levels', (req, res) => {
       db.get('SELECT COUNT(*) as total FROM levels', (err, count) => {
         res.json({
           levels: rows,
-          total: count.total,
+          total: count?.total || 0,
           limit: parseInt(limit),
           offset: parseInt(offset)
         });
@@ -117,7 +122,7 @@ app.get('/api/levels/:id/download', async (req, res) => {
         return res.status(404).json({ error: 'Level not found' });
       }
       
-      const filePath = path.join('uploads/levels', row.filename);
+      const filePath = path.join(UPLOADS_DIR, 'levels', row.filename);
       
       try {
         await fs.access(filePath);
@@ -133,7 +138,7 @@ app.get('/api/levels/:id/download', async (req, res) => {
   );
 });
 
-// Загрузить новый уровень (с файлом)
+// Загрузить новый уровень
 app.post('/api/levels/upload', upload.single('levelFile'), async (req, res) => {
   try {
     if (!req.file) {
@@ -143,7 +148,6 @@ app.post('/api/levels/upload', upload.single('levelFile'), async (req, res) => {
     const id = path.basename(req.file.filename, '.mylevel');
     const { name, author, description } = req.body;
     
-    // Читаем JSON чтобы получить количество объектов
     let objectsCount = 0;
     let levelName = name || 'Untitled';
     
@@ -156,7 +160,6 @@ app.post('/api/levels/upload', upload.single('levelFile'), async (req, res) => {
       console.warn('Не удалось прочитать JSON:', e.message);
     }
     
-    // Сохраняем в БД
     db.run(
       `INSERT INTO levels (id, name, author, description, filename, size, objects_count) 
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -197,15 +200,13 @@ app.delete('/api/levels/:id', async (req, res) => {
         return res.status(404).json({ error: 'Level not found' });
       }
       
-      // Удаляем файл
-      const filePath = path.join('uploads/levels', row.filename);
+      const filePath = path.join(UPLOADS_DIR, 'levels', row.filename);
       try {
         await fs.unlink(filePath);
       } catch (e) {
         console.warn('Файл уже удален:', e.message);
       }
       
-      // Удаляем из БД
       db.run('DELETE FROM levels WHERE id = ?', [id], (err) => {
         if (err) {
           return res.status(500).json({ error: 'Database error' });
@@ -231,21 +232,26 @@ app.get('/api/stats', (req, res) => {
       return res.status(500).json({ error: 'Database error' });
     }
     
-    res.json(stats);
+    res.json(stats || {});
   });
+});
+
+// Корневой путь - простая страница
+app.get('/', (req, res) => {
+  res.send(`
+    <h1>🎮 Level Server is Running!</h1>
+    <p>API Endpoints:</p>
+    <ul>
+      <li>GET /api/levels - List all levels</li>
+      <li>GET /api/levels/:id/download - Download level</li>
+      <li>POST /api/levels/upload - Upload level</li>
+    </ul>
+  `);
 });
 
 // Запуск сервера
 app.listen(PORT, () => {
-  console.log(`\n🚀 Сервер уровней запущен на http://localhost:${PORT}`);
-  console.log(`📁 Файлы хранятся в: ${path.resolve('uploads/levels')}`);
-  console.log(`💾 База данных: ${path.resolve('levels.db')}`);
-  console.log('\n📋 Доступные endpoint-ы:');
-  console.log(`   GET    /api/levels              - список уровней`);
-  console.log(`   GET    /api/levels/:id          - информация об уровне`);
-  console.log(`   GET    /api/levels/:id/download - скачать уровень`);
-  console.log(`   POST   /api/levels/upload       - загрузить уровень`);
-  console.log(`   DELETE /api/levels/:id          - удалить уровень`);
-  console.log(`   GET    /api/stats               - статистика`);
-  console.log('\n🌐 Веб-интерфейс: http://localhost:3000\n');
+  console.log(`Server running on port ${PORT}`);
+  console.log(`Uploads: ${path.join(UPLOADS_DIR, 'levels')}`);
+  console.log(`Database: ${DB_PATH}`);
 });
